@@ -8,11 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"flag"
+	"encoding/hex"
 )
 
 var (
 	channelProcess  = make(chan hashfile)
 	channelComplete = make(chan hashfile)
+	channelDone     = make(chan int)
 	debugMode       = false
 	directory       = "."
 	workerLimit     = 10
@@ -33,14 +35,22 @@ func main() {
 	validateDirectoryOrExit(directory)
 
 	// Setup workers.
+	go workerPrintResult(channelComplete)
 	for i := 1; i <= workerLimit; i++ {
 		go workerProcessFile(channelProcess);
 	}
-	go workerPrintResult(channelComplete)
 
 	// Find files and send to workers..
 	filepath.Walk(directory, findFilesCallback)
 
+	for {
+		<- channelDone
+	}
+
+	/*
+	close(channelProcess)
+	close(channelComplete)
+	*/
 }
 
 func findFilesCallback(path string, info os.FileInfo, e error) error {
@@ -64,7 +74,7 @@ func workerPrintResult(c chan (hashfile)) {
 	debugMessage("BEGIN: workerPrintResult")
 	for {
 		f := <- channelComplete
-		fmt.Printf("%s: %s", f.path, f.hash)
+		fmt.Printf("%s: %s\n", f.path, f.hash)
 	}
 }
 
@@ -76,11 +86,13 @@ func workerProcessFile(c chan (hashfile)) {
 		bytes, err := ioutil.ReadFile(f.path)
 		if err != nil {
 			fmt.Printf("ERROR: Could not read file '%s': %s'\n", f.path, err)
+			continue
 		}
-		continue
 
 		hash := md5.New()
-		f.hash = fmt.Sprintf("%x", hash.Sum(bytes))
+		hash.Write(bytes)
+		// f.hash = fmt.Sprintf("%x", hex.EncodeToString(hash.Sum(nil)))
+		f.hash = hex.EncodeToString(hash.Sum(nil))
 
 		channelComplete <- f
 	}
