@@ -2,22 +2,27 @@ package main
 
 import (
 	"crypto/md5"
+	"encoding/hex"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
-	"flag"
-	"encoding/hex"
+	"sync"
 )
 
 var (
 	channelProcess  = make(chan hashfile)
 	channelComplete = make(chan hashfile)
-	channelDone     = make(chan int)
 	debugMode       = false
 	directory       = "."
 	workerLimit     = 10
+	wg              sync.WaitGroup
+
+	countFilesFound     = 0
+	countFilesProcessed = 0
+	countFilesPrinted   = 0
 )
 
 func init() {
@@ -28,7 +33,6 @@ func init() {
 }
 
 func main() {
-	fmt.Printf("WTF? %s\n", directory)
 	debugMessage("BEGIN: main")
 
 	// Test scan directory.
@@ -37,22 +41,23 @@ func main() {
 	// Setup workers.
 	go workerPrintResult(channelComplete)
 	for i := 1; i <= workerLimit; i++ {
-		go workerProcessFile(channelProcess);
+		go workerProcessFile(channelProcess)
 	}
 
 	// Find files and send to workers..
 	filepath.Walk(directory, findFilesCallback)
 
-	for {
-		<- channelDone
-	}
+	// Wait until all files have been found, hashed, and printed.
+	wg.Wait()
 
-	/*
-	close(channelProcess)
-	close(channelComplete)
-	*/
+	fmt.Print("\nTotals:\n")
+	fmt.Printf("    Found: %d\n", countFilesFound)
+	fmt.Printf("Processed: %d\n", countFilesProcessed)
+	fmt.Printf("  Printed: %d\n", countFilesPrinted)
 }
 
+// Path walker callback.
+// TODO: Error parameter should be checked here.
 func findFilesCallback(path string, info os.FileInfo, e error) error {
 	// Skip directories.
 	if info.IsDir() {
@@ -63,6 +68,8 @@ func findFilesCallback(path string, info os.FileInfo, e error) error {
 	hf := hashfile{path: path}
 
 	// Add to process queue.
+	countFilesFound += 1
+	wg.Add(1)
 	channelProcess <- hf
 	debugMessage("BEGIN: findFilesCallback: found %s", path)
 
@@ -70,18 +77,18 @@ func findFilesCallback(path string, info os.FileInfo, e error) error {
 
 }
 
+// Prints the path and hash of a processed file.
 func workerPrintResult(c chan (hashfile)) {
-	debugMessage("BEGIN: workerPrintResult")
-	for {
-		f := <- channelComplete
+	for f := range c {
 		fmt.Printf("%s: %s\n", f.path, f.hash)
+		countFilesPrinted += 1
+		wg.Done()
 	}
 }
 
+// Handles hash generation for a file.
 func workerProcessFile(c chan (hashfile)) {
-	debugMessage("BEGIN: workerProcessFile")
-	for {
-		f := <-c
+	for f := range c {
 
 		bytes, err := ioutil.ReadFile(f.path)
 		if err != nil {
@@ -94,10 +101,12 @@ func workerProcessFile(c chan (hashfile)) {
 		// f.hash = fmt.Sprintf("%x", hex.EncodeToString(hash.Sum(nil)))
 		f.hash = hex.EncodeToString(hash.Sum(nil))
 
+		countFilesProcessed += 1
 		channelComplete <- f
 	}
 }
 
+// Ensures the path submitted exists and is a directory.
 func validateDirectoryOrExit(p string) {
 	v, err := os.Stat(p)
 
