@@ -12,9 +12,13 @@ import (
 	"sync"
 )
 
+const MODE_SYNC_WAITGROUP = "waitgroup"
+const MODE_SYNC_CHANNEL = "channel"
+
 var (
 	channelProcess  = make(chan hashfile)
 	channelComplete = make(chan hashfile)
+	channelDone     = make(chan int)
 	debugMode       = false
 	directory       = "."
 	workerLimit     = 10
@@ -23,6 +27,7 @@ var (
 	countFilesFound     = 0
 	countFilesProcessed = 0
 	countFilesPrinted   = 0
+	modeSync            = MODE_SYNC_CHANNEL
 )
 
 func init() {
@@ -46,9 +51,15 @@ func main() {
 
 	// Find files and send to workers..
 	filepath.Walk(directory, findFilesCallback)
+	close(channelProcess)
 
 	// Wait until all files have been found, hashed, and printed.
-	wg.Wait()
+	if modeSync == MODE_SYNC_WAITGROUP {
+		fmt.Println("USING SYNC WAITGROUP")
+		wg.Wait()
+	} else {
+		<-channelDone
+	}
 
 	fmt.Print("\nTotals:\n")
 	fmt.Printf("    Found: %d\n", countFilesFound)
@@ -67,9 +78,12 @@ func findFilesCallback(path string, info os.FileInfo, e error) error {
 	// Create new hashfile.
 	hf := hashfile{path: path}
 
+	if modeSync == MODE_SYNC_WAITGROUP {
+		wg.Add(1)
+	}
+
 	// Add to process queue.
 	countFilesFound += 1
-	wg.Add(1)
 	channelProcess <- hf
 	debugMessage("BEGIN: findFilesCallback: found %s", path)
 
@@ -82,10 +96,15 @@ func workerPrintResult(c chan (hashfile)) {
 	for f := range c {
 		fmt.Printf("%s: %s\n", f.path, f.hash)
 		countFilesPrinted += 1
-		wg.Done()
+
+		if modeSync == MODE_SYNC_WAITGROUP {
+			wg.Done()
+		} else if countFilesPrinted == countFilesFound { // TODO: This isn't working, if the printer gets ahead of the checksummer.
+			channelDone <- 1
+			return
+		}
 	}
 }
-
 // Handles hash generation for a file.
 func workerProcessFile(c chan (hashfile)) {
 	for f := range c {
