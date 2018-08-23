@@ -6,10 +6,11 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/henrocdotnet/golang-playground/internal/logger"
 )
 
 const MODE_SYNC_WAITGROUP = "waitgroup"
@@ -19,7 +20,7 @@ var (
 	channelProcess  = make(chan hashfile)
 	channelComplete = make(chan hashfile)
 	channelDone     = make(chan int)
-	debugMode       = false
+	DebugMode       = false
 	directory       = "."
 	workerLimit     = 10
 	wg              sync.WaitGroup
@@ -31,14 +32,14 @@ var (
 )
 
 func init() {
-	flag.BoolVar(&debugMode, "debug", false, "Enable debug mode.")
+	flag.BoolVar(&DebugMode, "debug", false, "Enable debug mode.")
 	flag.StringVar(&directory, "directory", ".", "Directory to scan.")
 	flag.IntVar(&workerLimit, "limit", 10, "Hash calculator worker limit.")
 	flag.Parse()
 }
 
 func main() {
-	debugMessage("BEGIN: main")
+	logger.Debug("BEGIN: main")
 
 	// Test scan directory.
 	validateDirectoryOrExit(directory)
@@ -85,7 +86,7 @@ func findFilesCallback(path string, info os.FileInfo, e error) error {
 	// Add to process queue.
 	countFilesFound += 1
 	channelProcess <- hf
-	debugMessage("BEGIN: findFilesCallback: found %s", path)
+	logger.Debug("BEGIN: findFilesCallback: found %s", path)
 
 	return nil
 
@@ -142,14 +143,6 @@ func validateDirectoryOrExit(p string) {
 		fmt.Printf("ERROR: '%s' is not a directory\n", p)
 		os.Exit(1)
 	}
-}
-
-func debugMessage(m string, v ...interface{}) {
-	if !debugMode {
-		return
-	}
-
-	log.Printf(m, v...)
 }
 
 // Types.

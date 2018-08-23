@@ -1,0 +1,9 @@
+{{ define "content" }}
+
+<ul>
+{{ range $x, $y := .list }}
+	<li>{{ $y.Title }}</li>
+{{ end }}
+</ul>
+
+{{ end }}
